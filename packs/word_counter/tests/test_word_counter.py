@@ -12,7 +12,14 @@ SUBMISSION = Path(__file__).resolve().parents[1] / "submission" / "word_counter.
 
 def _load_module():
     if not SUBMISSION.exists():
-        pytest.fail(f"Missing submission file: {SUBMISSION}")
+        pytest.fail(
+            f"Missing submission file: {SUBMISSION}\n"
+            "Stage one before running pack tests, e.g.\n"
+            "  mkdir -p packs/word_counter/submission\n"
+            "  cp fixtures/word_counter_partial/word_counter.py "
+            "packs/word_counter/submission/word_counter.py\n"
+            "Or run only evaluator unit tests: EVAL_DRY_RUN=1 python -m pytest -q"
+        )
     spec = importlib.util.spec_from_file_location("word_counter", SUBMISSION)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

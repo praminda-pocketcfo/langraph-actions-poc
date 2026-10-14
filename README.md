@@ -108,21 +108,16 @@ pip install -r requirements.txt
 EVAL_DRY_RUN=1 python -m pytest -q
 ```
 
-This covers scoring, routing, JUnit parsing, pack load, and a dry-run of the LangGraph pipeline against `fixtures/word_counter_partial`.
+`pytest.ini` limits collection to [`tests/`](tests/) (evaluator unit tests). It does **not** run [`packs/*/tests`](packs/word_counter/tests) — those need a submission file under `packs/<project>/submission/` (created by the Actions workflow, or by copying the fixture below).
 
 ### 3. Dry-run the evaluator CLI on the fixture
 
-Pytest runs instructor tests; the graph consumes a JUnit report (or empty counts). Example end-to-end dry-run:
+Instructor pack tests expect `packs/word_counter/submission/word_counter.py`. Copy the fixture first, then generate JUnit and run the graph:
 
 ```bash
-# Optional: generate a junit file from the fixture
-mkdir -p /tmp/wc-sub/submission
-cp fixtures/word_counter_partial/word_counter.py /tmp/wc-sub/word_counter.py
-# Instructor tests expect packs/word_counter/submission/word_counter.py
 mkdir -p packs/word_counter/submission
 cp fixtures/word_counter_partial/word_counter.py packs/word_counter/submission/word_counter.py
 python -m pytest packs/word_counter/tests -q --junitxml=/tmp/wc-junit.xml
-rm -rf packs/word_counter/submission
 
 python -m evaluator \
   --evaluation-id 00000000-0000-4000-8000-000000000001 \
@@ -130,6 +125,8 @@ python -m evaluator \
   --submission-dir fixtures/word_counter_partial \
   --junit /tmp/wc-junit.xml \
   --dry-run
+
+rm -rf packs/word_counter/submission
 ```
 
 `--dry-run` uses a deterministic fake model and does **not** write to Neon or GitHub. Prints the result JSON (status `awaiting_panel`).
