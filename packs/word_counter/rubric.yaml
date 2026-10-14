@@ -1,0 +1,26 @@
+project_id: word_counter
+pass_threshold: 70
+borderline_threshold: 50
+max_points: 100
+criteria:
+  - id: unit_tests
+    area: tests
+    mode: tests
+    max_points: 40
+    description: Instructor unit tests for count_words pass against the submission.
+
+  - id: handles_edge_cases
+    area: correctness
+    mode: agent
+    max_points: 30
+    description: >
+      The implementation correctly handles empty strings, runs of whitespace,
+      and leading or trailing whitespace without raising.
+
+  - id: clear_structure
+    area: structure
+    mode: agent
+    max_points: 30
+    description: >
+      count_words is a named public function with a clear signature, and the
+      module stays focused on word counting without unrelated side effects.

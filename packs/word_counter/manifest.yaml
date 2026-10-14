@@ -1,0 +1,5 @@
+project_id: word_counter
+title: Word Counter
+description: Implement a function that counts words in a string.
+submission_paths:
+  - word_counter.py
