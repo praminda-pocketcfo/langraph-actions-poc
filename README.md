@@ -83,7 +83,7 @@ Optional secrets:
 - `SUBMISSION_TOKEN` — if comments/files are on a different submission repository
 - `DATABASE_URL` — only when you turn Neon writes back on with `--write-neon`
 
-Note: `--dry-run` skips Neon and PR comment writes; use it to validate the Actions plumbing.
+Note: `EVAL_DRY_RUN` / `--dry-run` uses the fake model (no API key). It still posts the PR comment. Neon stays off unless `--write-neon`.
 
 ### Portal (Vercel) secrets — not in this repo
 
@@ -156,7 +156,7 @@ python -m evaluator \
   --junit /tmp/wc-junit.xml
 ```
 
-Omit `--dry-run` so the job upserts a PR comment containing `<!-- learner-evaluation:v1 -->`. Neon is skipped unless you also pass `--write-neon` (requires `DATABASE_URL`). Use `--skip-github` to print JSON only.
+Live or dry-run both upsert a PR comment containing `<!-- learner-evaluation:v1 -->` (unless `--skip-github`). Neon is skipped unless you also pass `--write-neon` (requires `DATABASE_URL`).
 
 ## Run in GitHub Actions / CI
 

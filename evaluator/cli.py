@@ -116,10 +116,11 @@ def main(argv: list[str] | None = None) -> int:
         }
 
         final_state, _app = run_evaluation(initial, dry_run=dry_run, thread_id=args.evaluation_id)
+        # --dry-run = fake model only. Still post the PR comment unless --skip-github.
+        # Neon stays off unless --write-neon (dry-run never writes Neon).
         result = publish(
             final_state,
-            dry_run=dry_run,
-            skip_github=args.skip_github or dry_run,
+            skip_github=bool(args.skip_github),
             skip_neon=skip_neon or dry_run,
         )
         print(json.dumps(result, indent=2))

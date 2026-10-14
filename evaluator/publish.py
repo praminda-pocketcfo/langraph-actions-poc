@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from . import github_io, neon
@@ -13,19 +12,20 @@ from .state import EvaluationState
 def publish(
     state: EvaluationState,
     *,
-    dry_run: bool = False,
     skip_github: bool = False,
     skip_neon: bool = True,
 ) -> dict[str, Any]:
+    """Publish result JSON consumers.
+
+    `--dry-run` only selects the fake model; it does not skip the PR comment.
+    Pass ``skip_github=True`` to print JSON only. Neon stays off unless
+    ``skip_neon=False`` (CLI ``--write-neon``).
+    """
     result = build_result(state)
     evaluation_id = state.get("evaluation_id")
     if not evaluation_id:
         raise RuntimeError("evaluation_id is required to publish")
 
-    if dry_run or os.environ.get("EVAL_DRY_RUN", "").lower() in {"1", "true", "yes"}:
-        return result
-
-    # POC default: skip Neon so evaluation works without DATABASE_URL.
     if not skip_neon:
         neon.publish_result(
             evaluation_id,
