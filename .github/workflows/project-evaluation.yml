@@ -150,6 +150,9 @@ jobs:
       pull-requests: write
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Repo variable: Settings → Secrets and variables → Actions → Variables.
+      # Set EVAL_DRY_RUN=true to use the fake model (no OPENAI_API_KEY required).
+      EVAL_DRY_RUN: ${{ vars.EVAL_DRY_RUN }}
       # Prefer a fine-grained PAT when the submission repo is external.
       GITHUB_TOKEN: ${{ secrets.SUBMISSION_TOKEN || github.token }}
       SUBMISSION_TOKEN: ${{ secrets.SUBMISSION_TOKEN }}
@@ -206,8 +209,13 @@ jobs:
         if: needs.test.outputs.pack_ok == 'true'
         run: |
           set -euo pipefail
+          dry="$(echo "${EVAL_DRY_RUN:-}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${dry}" == "1" || "${dry}" == "true" || "${dry}" == "yes" ]]; then
+            echo "EVAL_DRY_RUN=${EVAL_DRY_RUN}: using fake model (OPENAI_API_KEY not required)"
+            exit 0
+          fi
           if [[ -z "${OPENAI_API_KEY}" ]]; then
-            echo "OPENAI_API_KEY secret is required for live evaluation" >&2
+            echo "OPENAI_API_KEY secret is required for live evaluation (or set variable EVAL_DRY_RUN=true)" >&2
             exit 1
           fi
 
@@ -223,6 +231,12 @@ jobs:
           if [[ -n "${HEAD_SHA}" ]]; then
             HEAD_ARGS=(--head-sha "${HEAD_SHA}")
           fi
+          DRY_ARGS=()
+          dry="$(echo "${EVAL_DRY_RUN:-}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "${dry}" == "1" || "${dry}" == "true" || "${dry}" == "yes" ]]; then
+            DRY_ARGS=(--dry-run)
+            echo "Injecting --dry-run (EVAL_DRY_RUN=${EVAL_DRY_RUN})"
+          fi
           # Neon writes are off by default for the POC (no DATABASE_URL required).
           # Pass --write-neon later when the portal + Neon path is wired.
           python -m evaluator \
@@ -232,4 +246,5 @@ jobs:
             --pr-number "${PR_NUMBER}" \
             --run-url "${GITHUB_RUN_URL}" \
             "${HEAD_ARGS[@]}" \
-            "${JUNIT_ARGS[@]}"
+            "${JUNIT_ARGS[@]}" \
+            "${DRY_ARGS[@]}"

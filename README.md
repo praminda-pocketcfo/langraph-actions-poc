@@ -72,12 +72,18 @@ WHERE id = $1 AND portal_user_id = $2;
 
 Add under **Settings → Secrets and variables → Actions**:
 
-1. `OPENAI_API_KEY` (required for live evaluation)
+1. `OPENAI_API_KEY` (required for live evaluation unless dry-run is on)
 
-Optional:
+**Actions variable** (Settings → Secrets and variables → Actions → **Variables**):
+
+- `EVAL_DRY_RUN` — set to `true` / `1` / `yes` to inject `--dry-run` (fake model, no API key). Leave unset or `false` for live evaluation.
+
+Optional secrets:
 
 - `SUBMISSION_TOKEN` — if comments/files are on a different submission repository
 - `DATABASE_URL` — only when you turn Neon writes back on with `--write-neon`
+
+Note: `--dry-run` skips Neon and PR comment writes; use it to validate the Actions plumbing.
 
 ### Portal (Vercel) secrets — not in this repo
 
