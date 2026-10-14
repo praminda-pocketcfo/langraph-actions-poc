@@ -1,0 +1,237 @@
+name: Project evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      evaluation_id:
+        description: UUID of the existing Neon evaluation_runs row
+        required: true
+        type: string
+      submission_repo:
+        description: owner/name of the repository that contains the learner PR
+        required: true
+        type: string
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      project_id:
+        description: Pack id (for example word_counter)
+        required: true
+        type: string
+
+concurrency:
+  group: project-evaluation-${{ inputs.evaluation_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test:
+    name: Instructor unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pack_ok: ${{ steps.validate.outputs.pack_ok }}
+      pack_error: ${{ steps.validate.outputs.pack_error }}
+      head_sha: ${{ steps.fetch.outputs.head_sha }}
+    steps:
+      - name: Checkout evaluation repo (trusted packs)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate project pack
+        id: validate
+        run: |
+          set -euo pipefail
+          PROJECT="${{ inputs.project_id }}"
+          if [[ ! -f "packs/${PROJECT}/manifest.yaml" ]]; then
+            echo "pack_ok=false" >> "$GITHUB_OUTPUT"
+            echo "pack_error=Unknown project pack: ${PROJECT}" >> "$GITHUB_OUTPUT"
+            echo "Unknown project pack: ${PROJECT}"
+            exit 0
+          fi
+          echo "pack_ok=true" >> "$GITHUB_OUTPUT"
+          echo "pack_error=" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch submission files from PR head
+        id: fetch
+        if: steps.validate.outputs.pack_ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SUBMISSION_TOKEN || github.token }}
+          PROJECT: ${{ inputs.project_id }}
+          REPO: ${{ inputs.submission_repo }}
+          PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(gh api "repos/${REPO}/pulls/${PR}" --jq .head.sha)"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "PR head: ${HEAD_SHA}"
+
+          mapfile -t PATHS < <(python scripts/list_submission_paths.py "${PROJECT}")
+
+          if [[ ${#PATHS[@]} -eq 0 ]]; then
+            echo "manifest has no submission_paths" >&2
+            exit 1
+          fi
+
+          for rel in "${PATHS[@]}"; do
+            dest="packs/${PROJECT}/submission/${rel}"
+            mkdir -p "$(dirname "${dest}")"
+            # Contents API returns base64 for files; fail clearly if path is a directory.
+            encoding="$(gh api "repos/${REPO}/contents/${rel}?ref=${HEAD_SHA}" --jq .encoding)"
+            if [[ "${encoding}" != "base64" ]]; then
+              echo "Expected a file at ${rel} (encoding=${encoding})" >&2
+              exit 1
+            fi
+            gh api "repos/${REPO}/contents/${rel}?ref=${HEAD_SHA}" --jq .content \
+              | tr -d '\n' \
+              | base64 --decode > "${dest}"
+            echo "Fetched ${rel} -> ${dest}"
+          done
+
+      - name: Run instructor pytest (no secrets)
+        id: pytest
+        if: steps.validate.outputs.pack_ok == 'true'
+        working-directory: ${{ github.workspace }}
+        env:
+          # Explicitly clear secrets so learner code cannot see them.
+          OPENAI_API_KEY: ""
+          DATABASE_URL: ""
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+          SUBMISSION_TOKEN: ""
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts
+          set +e
+          python -m pytest "packs/${{ inputs.project_id }}/tests" -q \
+            --junitxml=artifacts/junit.xml
+          status=$?
+          set -e
+          echo "pytest_exit=${status}" >> "$GITHUB_OUTPUT"
+          # Failures must not skip the graph; JUnit is the handoff.
+          exit 0
+
+      - name: Upload JUnit artifact
+        if: always() && steps.validate.outputs.pack_ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.evaluation_id }}
+          path: artifacts/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Fail job when pack is unknown
+        if: steps.validate.outputs.pack_ok != 'true'
+        run: |
+          echo "${{ steps.validate.outputs.pack_error }}" >&2
+          exit 1
+
+  evaluate:
+    name: LangGraph evaluation
+    needs: test
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # Prefer a fine-grained PAT when the submission repo is external.
+      GITHUB_TOKEN: ${{ secrets.SUBMISSION_TOKEN || github.token }}
+      SUBMISSION_TOKEN: ${{ secrets.SUBMISSION_TOKEN }}
+      GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      EVALUATION_ID: ${{ inputs.evaluation_id }}
+      PROJECT_ID: ${{ inputs.project_id }}
+      SUBMISSION_REPO: ${{ inputs.submission_repo }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      HEAD_SHA: ${{ needs.test.outputs.head_sha }}
+    steps:
+      - name: Require evaluation_id
+        run: |
+          set -euo pipefail
+          if [[ -z "${EVALUATION_ID}" ]]; then
+            echo "evaluation_id is required" >&2
+            exit 1
+          fi
+          if [[ -z "${DATABASE_URL}" ]]; then
+            echo "DATABASE_URL secret is required" >&2
+            exit 1
+          fi
+
+      - name: Checkout evaluation repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Mark Neon error for unknown pack
+        if: needs.test.outputs.pack_ok != 'true'
+        run: |
+          set -euo pipefail
+          python -m evaluator \
+            --evaluation-id "${EVALUATION_ID}" \
+            --project-id "${PROJECT_ID:-unknown}" \
+            --run-url "${GITHUB_RUN_URL}" \
+            --mark-error "${{ needs.test.outputs.pack_error || 'Unknown project pack' }}"
+          exit 1
+
+      - name: Download JUnit artifact
+        if: needs.test.outputs.pack_ok == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: junit-${{ inputs.evaluation_id }}
+          path: artifacts
+        continue-on-error: true
+
+      - name: Require OpenAI key for live evaluation
+        if: needs.test.outputs.pack_ok == 'true'
+        run: |
+          set -euo pipefail
+          if [[ -z "${OPENAI_API_KEY}" ]]; then
+            echo "OPENAI_API_KEY secret is required for live evaluation" >&2
+            exit 1
+          fi
+
+      - name: Run LangGraph evaluator
+        if: needs.test.outputs.pack_ok == 'true'
+        run: |
+          set -euo pipefail
+          JUNIT_ARGS=()
+          if [[ -f artifacts/junit.xml ]]; then
+            JUNIT_ARGS=(--junit artifacts/junit.xml)
+          fi
+          HEAD_ARGS=()
+          if [[ -n "${HEAD_SHA}" ]]; then
+            HEAD_ARGS=(--head-sha "${HEAD_SHA}")
+          fi
+          python -m evaluator \
+            --evaluation-id "${EVALUATION_ID}" \
+            --project-id "${PROJECT_ID}" \
+            --submission-repo "${SUBMISSION_REPO}" \
+            --pr-number "${PR_NUMBER}" \
+            --run-url "${GITHUB_RUN_URL}" \
+            "${HEAD_ARGS[@]}" \
+            "${JUNIT_ARGS[@]}"
