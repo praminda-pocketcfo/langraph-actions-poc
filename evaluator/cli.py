@@ -43,20 +43,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-url", default=os.environ.get("GITHUB_RUN_URL", ""))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-github", action="store_true")
-    parser.add_argument("--mark-error", default="", help="Mark the Neon row as error and exit")
+    parser.add_argument(
+        "--write-neon",
+        action="store_true",
+        help="Persist result to Neon (requires DATABASE_URL). Off by default for the POC.",
+    )
+    parser.add_argument("--mark-error", default="", help="Record an error (Neon only if --write-neon) and exit")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     dry_run = bool(args.dry_run)
+    write_neon = bool(args.write_neon)
+    skip_neon = not write_neon
     root = _repo_root()
 
     if args.mark_error:
-        if dry_run:
-            print(json.dumps({"status": "error", "error": args.mark_error}))
-            return 1
-        neon.mark_error(args.evaluation_id, args.mark_error, run_url=args.run_url or None)
+        payload = {
+            "version": 1,
+            "evaluation_id": args.evaluation_id,
+            "status": "error",
+            "error": args.mark_error,
+            "run_url": args.run_url or "",
+        }
+        print(json.dumps(payload, indent=2))
+        if write_neon and not dry_run:
+            neon.mark_error(args.evaluation_id, args.mark_error, run_url=args.run_url or None)
         return 1
 
     try:
@@ -68,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.submission_dir:
             submission_files = _load_submission_from_dir(Path(args.submission_dir), paths)
         elif args.submission_repo and args.pr_number:
-            if not dry_run:
+            if write_neon and not dry_run:
                 neon.mark_running(args.evaluation_id, head_sha=head_sha or None, run_url=args.run_url or None)
             pr = github_io.get_pull_request(args.submission_repo, args.pr_number)
             head_sha = head_sha or (pr.get("head") or {}).get("sha") or ""
@@ -103,19 +116,35 @@ def main(argv: list[str] | None = None) -> int:
         }
 
         final_state, _app = run_evaluation(initial, dry_run=dry_run, thread_id=args.evaluation_id)
-        result = publish(final_state, dry_run=dry_run, skip_github=args.skip_github or dry_run)
+        result = publish(
+            final_state,
+            dry_run=dry_run,
+            skip_github=args.skip_github or dry_run,
+            skip_neon=skip_neon or dry_run,
+        )
         print(json.dumps(result, indent=2))
         return 0
     except Exception as exc:
         message = str(exc)
         print(message, file=sys.stderr)
-        if not dry_run:
+        print(
+            json.dumps(
+                build_result(  # type: ignore[arg-type]
+                    {
+                        "evaluation_id": args.evaluation_id,
+                        "status": "error",
+                        "error": message,
+                        "run_url": args.run_url,
+                    }
+                ),
+                indent=2,
+            )
+        )
+        if write_neon and not dry_run:
             try:
                 neon.mark_error(args.evaluation_id, message, run_url=args.run_url or None)
             except Exception as nested:
                 print(f"failed to mark error in Neon: {nested}", file=sys.stderr)
-        else:
-            print(json.dumps(build_result({"evaluation_id": args.evaluation_id, "status": "error", "error": message})))  # type: ignore[arg-type]
         return 1
 
 

@@ -1,4 +1,4 @@
-"""Publish evaluation outputs to Neon and GitHub."""
+"""Publish evaluation outputs to GitHub (and optionally Neon)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,13 @@ from .result import build_result, serializable_state
 from .state import EvaluationState
 
 
-def publish(state: EvaluationState, *, dry_run: bool = False, skip_github: bool = False) -> dict[str, Any]:
+def publish(
+    state: EvaluationState,
+    *,
+    dry_run: bool = False,
+    skip_github: bool = False,
+    skip_neon: bool = True,
+) -> dict[str, Any]:
     result = build_result(state)
     evaluation_id = state.get("evaluation_id")
     if not evaluation_id:
@@ -19,14 +25,16 @@ def publish(state: EvaluationState, *, dry_run: bool = False, skip_github: bool 
     if dry_run or os.environ.get("EVAL_DRY_RUN", "").lower() in {"1", "true", "yes"}:
         return result
 
-    neon.publish_result(
-        evaluation_id,
-        result=result,
-        state=serializable_state(state),
-        recommendation=result.get("recommendation"),
-        head_sha=state.get("head_sha"),
-        run_url=state.get("run_url"),
-    )
+    # POC default: skip Neon so evaluation works without DATABASE_URL.
+    if not skip_neon:
+        neon.publish_result(
+            evaluation_id,
+            result=result,
+            state=serializable_state(state),
+            recommendation=result.get("recommendation"),
+            head_sha=state.get("head_sha"),
+            run_url=state.get("run_url"),
+        )
 
     if not skip_github and state.get("submission_repo") and state.get("pr_number"):
         github_io.upsert_evaluation_comment(

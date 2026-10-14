@@ -4,10 +4,10 @@ overview: The signed-in portal creates the evaluation row, then dispatches this 
 todos:
   - id: sample-project
     content: Add the word_counter pack (tests, rubric, manifest) and a partial submission fixture
-    status: pending
+    status: completed
   - id: graph
     content: "Implement the LangGraph package: route, parallel specialists, verifier, score, feedback, panel interrupt, dry-run model"
-    status: pending
+    status: in_progress
   - id: publish
     content: Update the existing Neon row by evaluation id and upsert a PR comment
     status: pending

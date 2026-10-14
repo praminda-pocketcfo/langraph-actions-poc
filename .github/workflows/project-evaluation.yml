@@ -150,7 +150,6 @@ jobs:
       pull-requests: write
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
       # Prefer a fine-grained PAT when the submission repo is external.
       GITHUB_TOKEN: ${{ secrets.SUBMISSION_TOKEN || github.token }}
       SUBMISSION_TOKEN: ${{ secrets.SUBMISSION_TOKEN }}
@@ -168,10 +167,6 @@ jobs:
             echo "evaluation_id is required" >&2
             exit 1
           fi
-          if [[ -z "${DATABASE_URL}" ]]; then
-            echo "DATABASE_URL secret is required" >&2
-            exit 1
-          fi
 
       - name: Checkout evaluation repo
         uses: actions/checkout@v4
@@ -187,10 +182,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Mark Neon error for unknown pack
+      - name: Fail on unknown pack
         if: needs.test.outputs.pack_ok != 'true'
         run: |
           set -euo pipefail
+          echo "${{ needs.test.outputs.pack_error || 'Unknown project pack' }}" >&2
           python -m evaluator \
             --evaluation-id "${EVALUATION_ID}" \
             --project-id "${PROJECT_ID:-unknown}" \
@@ -227,6 +223,8 @@ jobs:
           if [[ -n "${HEAD_SHA}" ]]; then
             HEAD_ARGS=(--head-sha "${HEAD_SHA}")
           fi
+          # Neon writes are off by default for the POC (no DATABASE_URL required).
+          # Pass --write-neon later when the portal + Neon path is wired.
           python -m evaluator \
             --evaluation-id "${EVALUATION_ID}" \
             --project-id "${PROJECT_ID}" \
