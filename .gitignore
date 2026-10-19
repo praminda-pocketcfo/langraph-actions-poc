@@ -10,3 +10,11 @@ build/
 
 # Populated by the evaluation workflow or local fixture copy — not committed.
 packs/*/submission/
+
+# Submission portal (TanStack Start)
+portal/node_modules/
+portal/.output/
+portal/.nitro/
+portal/.tanstack/
+portal/.env
+portal/.env.local

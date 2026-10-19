@@ -1,0 +1,176 @@
+:root {
+  color-scheme: light;
+  --ink: #1c1915;
+  --muted: #5e584f;
+  --line: #ddd6c8;
+  --paper: #f6f3ec;
+  --card: #fffcf7;
+  --accent: #1f6b4a;
+  --accent-ink: #f4fbf7;
+  --danger: #8c2f2f;
+  --danger-bg: #f8ecec;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+main {
+  max-width: 740px;
+  margin: 0 auto;
+  padding: 48px 20px 80px;
+}
+
+h1 {
+  font-family: "Iowan Old Style", Palatino, Georgia, serif;
+  font-size: 2.4rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+}
+
+.lede {
+  margin: 0 0 28px;
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 62ch;
+}
+
+form,
+.result,
+.error {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+form {
+  display: grid;
+  gap: 16px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.92rem;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.hint {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+input[type="text"],
+input[type="file"] {
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+fieldset {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+fieldset label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-weight: 400;
+}
+
+button {
+  justify-self: start;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.error {
+  margin-top: 16px;
+  background: var(--danger-bg);
+  border-color: #e4c8c8;
+  color: var(--danger);
+}
+
+.result {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.result h2 {
+  font-family: "Iowan Old Style", Palatino, Georgia, serif;
+  font-weight: 500;
+  margin: 0 0 4px;
+}
+
+.result a {
+  color: var(--accent);
+}
+
+.result dl {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.result dt {
+  color: var(--muted);
+}
+
+.result dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.files {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
