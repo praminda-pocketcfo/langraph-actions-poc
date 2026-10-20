@@ -216,6 +216,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: submission-${{ inputs.evaluation_id }}
+          path: submission-src
 
       - name: Download JUnit artifact
         if: needs.test.outputs.staged == 'true'
