@@ -1,44 +1,32 @@
-import { dispatchEvaluation, publishSubmission, readConfig, type SubmitMode } from "./github";
+import { uploadSubmissionZip } from "./drive";
+import { dispatchEvaluation, readConfig } from "./github";
 import { HttpError } from "./http-error";
-import { extractProjectZip, MAX_ZIP_BYTES } from "./zip";
+import { MAX_ZIP_BYTES } from "./zip";
 
 export type SubmitResult = {
   evaluationId: string;
-  mode: SubmitMode;
   learnerId: string;
   courseId: string;
   projectId: string;
-  submissionRepo: string;
-  branch: string;
-  commitSha: string;
-  pullRequestNumber: number;
-  pullRequestUrl: string;
-  filesCommitted: string[];
-  skipped: string[];
+  folderUrl: string;
+  downloadUrl: string;
   workflowUrl: string;
   dispatched: boolean;
   dispatchError?: string;
-  note: string;
 };
 
 export async function submitProject(form: FormData): Promise<SubmitResult> {
   const learnerId = textField(form, "learnerId", 80);
   const courseId = textField(form, "courseId", 80);
   const projectId = projectField(form);
-  const mode = modeField(form);
   const zip = await zipField(form);
-  const extracted = extractProjectZip(zip);
   const config = readConfig();
   const evaluationId = crypto.randomUUID();
-
-  const published = await publishSubmission({
-    config,
-    mode,
-    evaluationId,
+  const uploaded = await uploadSubmissionZip({
     learnerId,
-    courseId,
     projectId,
-    files: extracted.files,
+    evaluationId,
+    zip,
   });
 
   const workflowUrl = `https://github.com/${config.evalRepo}/actions/workflows/${encodeURIComponent(config.evalWorkflow)}`;
@@ -48,9 +36,8 @@ export async function submitProject(form: FormData): Promise<SubmitResult> {
     await dispatchEvaluation({
       config,
       evaluationId,
-      submissionRepo: published.submissionRepo,
-      pullRequestNumber: published.pullRequestNumber,
       projectId,
+      submissionUrl: uploaded.downloadUrl,
     });
   } catch (error) {
     dispatched = false;
@@ -59,32 +46,15 @@ export async function submitProject(form: FormData): Promise<SubmitResult> {
 
   return {
     evaluationId,
-    mode,
     learnerId,
     courseId,
     projectId,
-    submissionRepo: published.submissionRepo,
-    branch: published.branch,
-    commitSha: published.commitSha,
-    pullRequestNumber: published.pullRequestNumber,
-    pullRequestUrl: published.pullRequestUrl,
-    filesCommitted: extracted.files.map((file) => file.path),
-    skipped: extracted.skipped.slice(0, 40),
+    folderUrl: uploaded.folderUrl,
+    downloadUrl: uploaded.downloadUrl,
     workflowUrl,
     dispatched,
     dispatchError,
-    note: modeNote(mode, published.submissionRepo === config.evalRepo),
   };
-}
-
-function modeNote(mode: SubmitMode, sameRepo: boolean): string {
-  if (sameRepo) {
-    return "This pull request is on the evaluation repo. The workflow can read it with the default Actions token. Learner files now exist on the repo that holds the model key.";
-  }
-  if (mode === "repo") {
-    return "The evaluation repo needs a SUBMISSION_TOKEN that can read this new repository. A fine-grained token limited to older repos will not see it, and the grader will fail when it fetches files.";
-  }
-  return "If this is not the evaluation repo, set SUBMISSION_TOKEN there so the workflow can read the pull request and comment on it.";
 }
 
 function textField(form: FormData, name: string, max: number): string {
@@ -93,8 +63,8 @@ function textField(form: FormData, name: string, max: number): string {
     throw new HttpError(400, `${name} is required.`);
   }
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > max || /[\r\n]/.test(trimmed)) {
-    throw new HttpError(400, `${name} must be 1–${max} characters on one line.`);
+  if (!trimmed || trimmed.length > max || /[\r\n/\\]/.test(trimmed)) {
+    throw new HttpError(400, `${name} must be 1–${max} characters on one line, without slashes.`);
   }
   return trimmed;
 }
@@ -105,12 +75,6 @@ function projectField(form: FormData): string {
     throw new HttpError(400, "projectId must be a pack id such as word_counter.");
   }
   return projectId;
-}
-
-function modeField(form: FormData): SubmitMode {
-  const mode = form.get("mode");
-  if (mode === "branch" || mode === "repo") return mode;
-  throw new HttpError(400, "Choose a branch in the configured repo, or a new private repo.");
 }
 
 async function zipField(form: FormData): Promise<Uint8Array> {
@@ -124,5 +88,9 @@ async function zipField(form: FormData): Promise<Uint8Array> {
   if (file.size > MAX_ZIP_BYTES) {
     throw new HttpError(400, "Zip must be 4 MB or smaller.");
   }
-  return new Uint8Array(await file.arrayBuffer());
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
+    throw new HttpError(400, "That file is not a zip archive.");
+  }
+  return bytes;
 }

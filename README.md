@@ -175,51 +175,41 @@ There is **no** `pull_request` / `pull_request_target` grader. Learner PRs do no
 | Input             | Required | Description                   |
 | ----------------- | -------- | ----------------------------- |
 | `evaluation_id`   | yes      | Correlation id (kept for portal/Neon later; echoed in the result JSON) |
-| `submission_repo` | yes      | `owner/name` of the PR repo   |
-| `pr_number`       | yes      | Pull request number           |
-| `project_id`      | yes      | Pack id, e.g. `word_counter`  |
+| `submission_url` | yes      | Drive file link, `https://drive.google.com/file/d/FILE_ID/view` |
+| `project_id`     | yes      | Pack id, e.g. `word_counter`  |
 
 
 
 
 ### Manual dispatch (stand-in for the portal)
 
-1. Ensure secret `OPENAI_API_KEY` is set on this repo.
-2. Open a PR whose head contains `word_counter.py` (or use a PR on this repo for the POC).
-3. Dispatch (any UUID is fine for `evaluation_id` in the POC):
+The portal in [`portal/`](portal/) uploads the zip with the Drive client and dispatches this workflow with the file link (`https://drive.google.com/file/d/FILE_ID/view`).
 
 ```bash
 gh workflow run project-evaluation.yml \
   -f evaluation_id="$(uuidgen | tr '[:upper:]' '[:lower:]')" \
-  -f submission_repo=praminda-pocketcfo/langraph-actions-poc \
-  -f pr_number=<n> \
+  -f submission_url='https://drive.google.com/file/d/FILE_ID/view' \
   -f project_id=word_counter
 ```
 
-4. Confirm the Actions log prints the result JSON and the PR has the evaluation comment (`awaiting_panel`).
+The run downloads that zip through the Drive API, extracts it, and runs the instructor tests.
 
 
 
 ### What the evaluation workflow does
 
-1. **Test job** — checkout this repo at `main`; fetch only the pack’s `submission_paths` from the PR head; run instructor pytest with secrets unset; upload JUnit. Failures do not skip the graph.
-2. **Evaluate job** — load packs from `main`; never import submission code; call `python -m evaluator` with `OPENAI_API_KEY`; upsert the PR comment. Neon is not written unless `--write-neon` is enabled later.
+1. **Test job** — checkout this repo at `main`; download the zip from `submission_url`; extract it; stage the pack's `submission_paths`; run instructor pytest with secrets unset; upload JUnit and the extracted tree. Test failures do not skip the graph.
+2. **Evaluate job** — load packs from `main`; read the extracted files from the test job's artifact; call `python -m evaluator`. It does not contact a submission repository. Neon is not written unless `--write-neon` is enabled later.
 
 Concurrency is grouped by `evaluation_id` (cancel in progress).
 
 ### Portal submit contract (later, in Vercel)
 
-Authenticated `POST` with course id, project id, and PR URL:
-
-1. Parse `owner/repo` and PR number; confirm the PR exists.
-2. `INSERT` into `evaluation_runs` with `portal_user_id` from the session, `status = pending`.
-3. `POST /repos/<this-repo>/actions/workflows/project-evaluation.yml/dispatches` with `ref=main` and the inputs above.
-
-Until that route exists, use `gh workflow run` (and a manual insert) as the stand-in.
+The portal in [`portal/`](portal/) accepts the zip, stores it on Google Drive at `<learner id>/<project id>/`, and dispatches this workflow with the file link. Neon insert is not part of this POC.
 
 ## Result shape
 
-Stored in `evaluation_runs.result` and mirrored in the PR comment JSON block:
+Stored in `evaluation_runs.result` when Neon writes are turned on:
 
 - `version`, `evaluation_id`, `pr`, `project_id`, `head_sha`, `run_url`
 - `test`: `{ passed, failed, errors }`
@@ -232,7 +222,6 @@ Recommendation thresholds (from the pack rubric): pass ≥ 70, borderline ≥ 50
 
 ## Out of scope for this POC
 
-- Vercel submit UI/route implementation
 - Auto-rerun on new pushes
 - Resuming the LangGraph interrupt after panel decision
 - GitHub App

@@ -7,12 +7,8 @@ on:
         description: UUID of the existing Neon evaluation_runs row
         required: true
         type: string
-      submission_repo:
-        description: owner/name of the repository that contains the learner PR
-        required: true
-        type: string
-      pr_number:
-        description: Pull request number
+      submission_url:
+        description: Google Drive file link (https://drive.google.com/file/d/FILE_ID/view)
         required: true
         type: string
       project_id:
@@ -32,11 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
     outputs:
       pack_ok: ${{ steps.validate.outputs.pack_ok }}
       pack_error: ${{ steps.validate.outputs.pack_error }}
-      head_sha: ${{ steps.fetch.outputs.head_sha }}
+      staged: ${{ steps.stage.outputs.staged }}
     steps:
       - name: Checkout evaluation repo (trusted packs)
         uses: actions/checkout@v4
@@ -66,45 +61,64 @@ jobs:
           echo "pack_ok=true" >> "$GITHUB_OUTPUT"
           echo "pack_error=" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch submission files from PR head
-        id: fetch
+      - name: Download and extract submission zip
+        id: stage
         if: steps.validate.outputs.pack_ok == 'true'
         env:
-          GH_TOKEN: ${{ secrets.SUBMISSION_TOKEN || github.token }}
+          SUBMISSION_URL: ${{ inputs.submission_url }}
           PROJECT: ${{ inputs.project_id }}
-          REPO: ${{ inputs.submission_repo }}
-          PR: ${{ inputs.pr_number }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
           set -euo pipefail
-          HEAD_SHA="$(gh api "repos/${REPO}/pulls/${PR}" --jq .head.sha)"
-          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
-          echo "PR head: ${HEAD_SHA}"
+          python - <<'PY'
+          import os, sys
+          project = os.environ["PROJECT"]
+          if not project or any(c not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for c in project):
+              sys.exit("project_id must be a pack slug")
+          PY
+
+          python scripts/download_drive_file.py "$SUBMISSION_URL" submission.zip
+          python - <<'PY'
+          import sys
+          magic = open("submission.zip", "rb").read(2)
+          if magic != b"PK":
+              sys.exit("Drive did not return a zip.")
+          PY
+
+          python scripts/extract_submission_zip.py submission.zip submission-src
 
           mapfile -t PATHS < <(python scripts/list_submission_paths.py "${PROJECT}")
-
           if [[ ${#PATHS[@]} -eq 0 ]]; then
             echo "manifest has no submission_paths" >&2
             exit 1
           fi
-
           for rel in "${PATHS[@]}"; do
+            src="submission-src/${rel}"
             dest="packs/${PROJECT}/submission/${rel}"
-            mkdir -p "$(dirname "${dest}")"
-            # Contents API returns base64 for files; fail clearly if path is a directory.
-            encoding="$(gh api "repos/${REPO}/contents/${rel}?ref=${HEAD_SHA}" --jq .encoding)"
-            if [[ "${encoding}" != "base64" ]]; then
-              echo "Expected a file at ${rel} (encoding=${encoding})" >&2
+            if [[ ! -f "${src}" ]]; then
+              echo "Missing submission file: ${rel}" >&2
               exit 1
             fi
-            gh api "repos/${REPO}/contents/${rel}?ref=${HEAD_SHA}" --jq .content \
-              | tr -d '\n' \
-              | base64 --decode > "${dest}"
-            echo "Fetched ${rel} -> ${dest}"
+            mkdir -p "$(dirname "${dest}")"
+            cp "${src}" "${dest}"
+            echo "Staged ${rel}"
           done
+
+          echo "staged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload extracted submission
+        if: steps.stage.outputs.staged == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: submission-${{ inputs.evaluation_id }}
+          path: submission-src
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Run instructor pytest (no secrets)
         id: pytest
-        if: steps.validate.outputs.pack_ok == 'true'
+        if: steps.stage.outputs.staged == 'true'
         working-directory: ${{ github.workspace }}
         env:
           # Explicitly clear secrets so learner code cannot see them.
@@ -113,6 +127,7 @@ jobs:
           GITHUB_TOKEN: ""
           GH_TOKEN: ""
           SUBMISSION_TOKEN: ""
+          GOOGLE_SERVICE_ACCOUNT_JSON: ""
         run: |
           set -uo pipefail
           mkdir -p artifacts
@@ -147,21 +162,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       # Repo variable: Settings → Secrets and variables → Actions → Variables.
       # Set EVAL_DRY_RUN=true to use the fake model (no OPENAI_API_KEY required).
       EVAL_DRY_RUN: ${{ vars.EVAL_DRY_RUN }}
-      # Prefer a fine-grained PAT when the submission repo is external.
-      GITHUB_TOKEN: ${{ secrets.SUBMISSION_TOKEN || github.token }}
-      SUBMISSION_TOKEN: ${{ secrets.SUBMISSION_TOKEN }}
       GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
       EVALUATION_ID: ${{ inputs.evaluation_id }}
       PROJECT_ID: ${{ inputs.project_id }}
-      SUBMISSION_REPO: ${{ inputs.submission_repo }}
-      PR_NUMBER: ${{ inputs.pr_number }}
-      HEAD_SHA: ${{ needs.test.outputs.head_sha }}
     steps:
       - name: Require evaluation_id
         run: |
@@ -197,8 +205,20 @@ jobs:
             --mark-error "${{ needs.test.outputs.pack_error || 'Unknown project pack' }}"
           exit 1
 
+      - name: Fail when the zip was not extracted
+        if: needs.test.outputs.pack_ok == 'true' && needs.test.outputs.staged != 'true'
+        run: |
+          echo "The submission zip was not extracted. See the test job log." >&2
+          exit 1
+
+      - name: Download extracted submission
+        if: needs.test.outputs.staged == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: submission-${{ inputs.evaluation_id }}
+
       - name: Download JUnit artifact
-        if: needs.test.outputs.pack_ok == 'true'
+        if: needs.test.outputs.staged == 'true'
         uses: actions/download-artifact@v4
         with:
           name: junit-${{ inputs.evaluation_id }}
@@ -206,7 +226,7 @@ jobs:
         continue-on-error: true
 
       - name: Require OpenAI key for live evaluation
-        if: needs.test.outputs.pack_ok == 'true'
+        if: needs.test.outputs.staged == 'true'
         run: |
           set -euo pipefail
           dry="$(echo "${EVAL_DRY_RUN:-}" | tr '[:upper:]' '[:lower:]')"
@@ -220,16 +240,12 @@ jobs:
           fi
 
       - name: Run LangGraph evaluator
-        if: needs.test.outputs.pack_ok == 'true'
+        if: needs.test.outputs.staged == 'true'
         run: |
           set -euo pipefail
           JUNIT_ARGS=()
           if [[ -f artifacts/junit.xml ]]; then
             JUNIT_ARGS=(--junit artifacts/junit.xml)
-          fi
-          HEAD_ARGS=()
-          if [[ -n "${HEAD_SHA}" ]]; then
-            HEAD_ARGS=(--head-sha "${HEAD_SHA}")
           fi
           DRY_ARGS=()
           dry="$(echo "${EVAL_DRY_RUN:-}" | tr '[:upper:]' '[:lower:]')"
@@ -237,14 +253,12 @@ jobs:
             DRY_ARGS=(--dry-run)
             echo "Injecting --dry-run (EVAL_DRY_RUN=${EVAL_DRY_RUN})"
           fi
-          # Neon writes are off by default for the POC (no DATABASE_URL required).
-          # Pass --write-neon later when the portal + Neon path is wired.
+          # There is no submission pull request. The zip on Drive is the source.
           python -m evaluator \
             --evaluation-id "${EVALUATION_ID}" \
             --project-id "${PROJECT_ID}" \
-            --submission-repo "${SUBMISSION_REPO}" \
-            --pr-number "${PR_NUMBER}" \
+            --submission-dir submission-src \
+            --skip-github \
             --run-url "${GITHUB_RUN_URL}" \
-            "${HEAD_ARGS[@]}" \
             "${JUNIT_ARGS[@]}" \
             "${DRY_ARGS[@]}"

@@ -3,18 +3,14 @@ import { useState, type FormEvent } from "react";
 
 type SubmitResult = {
   evaluationId: string;
-  mode: "branch" | "repo";
-  submissionRepo: string;
-  branch: string;
-  commitSha: string;
-  pullRequestNumber: number;
-  pullRequestUrl: string;
-  filesCommitted: string[];
-  skipped: string[];
+  learnerId: string;
+  courseId: string;
+  projectId: string;
+  folderUrl: string;
+  downloadUrl: string;
   workflowUrl: string;
   dispatched: boolean;
   dispatchError?: string;
-  note: string;
 };
 
 export const Route = createFileRoute("/")({
@@ -55,10 +51,10 @@ function Home() {
     <main>
       <h1>Submit a project</h1>
       <p className="lede">
-        Zip the project you worked on and upload it. The server copies the files
-        into a private GitHub repository with its own token, opens a draft pull
-        request, and starts the evaluation workflow. Your GitHub user is not
-        added to that repository, so you cannot browse other uploads.
+        Zip the local project and upload it. The server stores that zip in a
+        Google Drive folder named with your learner id and project id, then
+        starts evaluation. The workflow downloads the zip with the same service
+        account. It does not push the project to a GitHub repository.
       </p>
 
       <form onSubmit={onSubmit}>
@@ -78,34 +74,10 @@ function Home() {
         <label>
           <span className="label">Project zip</span>
           <span className="hint">
-            4 MB max. A single wrapping folder is fine. .git, node_modules, and .env files are left out.
+            4 MB max.
           </span>
           <input name="file" type="file" required accept=".zip,application/zip" />
         </label>
-
-        <fieldset>
-          <legend>Where it lands</legend>
-          <label>
-            <input type="radio" name="mode" value="branch" defaultChecked />
-            <span>
-              <span className="label">Branch in the configured private repo</span>
-              <span className="hint">
-                One repository, one branch and draft pull request per upload. Zero extra seats.
-                Anyone later invited to that repo can read every submission.
-              </span>
-            </span>
-          </label>
-          <label>
-            <input type="radio" name="mode" value="repo" />
-            <span>
-              <span className="label">New private repository</span>
-              <span className="hint">
-                A separate private repo for this upload. Still no collaborator invite.
-                The evaluation token must be allowed to see newly created repos.
-              </span>
-            </span>
-          </label>
-        </fieldset>
 
         <button type="submit" disabled={pending}>
           {pending ? "Uploading…" : "Upload and evaluate"}
@@ -124,44 +96,31 @@ function Home() {
 }
 
 function Result({ result }: { result: SubmitResult }) {
-  const sample = result.filesCommitted.slice(0, 12);
-  const extra = result.filesCommitted.length - sample.length;
   return (
     <section className="result" role="status">
       <h2>{result.dispatched ? "Evaluation started" : "Uploaded, dispatch failed"}</h2>
       <dl>
         <dt>Evaluation</dt>
         <dd>{result.evaluationId}</dd>
-        <dt>Repository</dt>
-        <dd>{result.submissionRepo}</dd>
-        <dt>Branch</dt>
-        <dd>{result.branch}</dd>
-        <dt>Pull request</dt>
+        <dt>Learner</dt>
+        <dd>{result.learnerId}</dd>
+        <dt>Project</dt>
+        <dd>{result.projectId}</dd>
+        <dt>Drive folder</dt>
         <dd>
-          <a href={result.pullRequestUrl}>#{result.pullRequestNumber}</a>
+          <a href={result.folderUrl}>{result.learnerId}/{result.projectId}</a>
         </dd>
-        <dt>Commit</dt>
-        <dd>{result.commitSha.slice(0, 12)}</dd>
         <dt>Workflow</dt>
         <dd>
           <a href={result.workflowUrl}>project-evaluation.yml</a>
         </dd>
       </dl>
-      <p className="note">{result.note}</p>
       {result.dispatchError ? <p className="note">{result.dispatchError}</p> : null}
       <p className="note">
-        GitHub accepts the dispatch with an empty 204 response, so this page does
-        not get a run id. The run shows up on the workflow page within a few seconds.
+        GitHub accepts the dispatch with an empty 204 response, so this page
+        does not get a run id. The run shows up on the workflow page within a
+        few seconds.
       </p>
-      <ul className="files">
-        {sample.map((path) => (
-          <li key={path}>{path}</li>
-        ))}
-      </ul>
-      {extra > 0 ? <p className="note">and {extra} more files</p> : null}
-      {result.skipped.length > 0 ? (
-        <p className="note">Skipped {result.skipped.length} paths (.git, dependencies, env files, or OS metadata).</p>
-      ) : null}
     </section>
   );
 }

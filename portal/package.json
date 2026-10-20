@@ -9,6 +9,7 @@
     "check": "node --experimental-strip-types --test src/server/zip.test.ts"
   },
   "dependencies": {
+    "@googleapis/drive": "^26.0.2",
     "@tanstack/react-router": "^1.170.44",
     "@tanstack/react-start": "^1.169.2",
     "fflate": "^0.8.3",
